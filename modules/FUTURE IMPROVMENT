@@ -1,0 +1,69 @@
+Alpine Linux (Linux Alpine) doesn’t have native DNS-over-HTTPS (DoH) support built into musl, but you **can enable DoH** using the `dnscrypt-proxy` package. Here's what you need to know:
+
+---
+
+### 🔧 DoH on Alpine with `dnscrypt-proxy`
+
+* Install with:
+
+  ```bash
+  apk add dnscrypt-proxy dnscrypt-proxy-openrc
+  ```
+
+* `dnscrypt-proxy` supports:
+
+  * DNS-over-HTTPS (DoH)
+  * DNSCrypt
+  * Oblivious DoH (ODoH)
+  * Act as local DoH server for applications/browsers ([wiki.alpinelinux.org][1]).
+
+* To enable DoH server on your machine:
+
+  * Configure `/etc/dnscrypt-proxy/dnscrypt-proxy.toml`:
+
+    ```toml
+    [local_doh]
+    listen_addresses = [":3000"]
+    path = "/dns-query"
+    cert_file = "localhost.pem"
+    cert_key_file = "localhost.pem"
+    ```
+  * Restart service:
+
+    ```bash
+    rc-service dnscrypt-proxy restart
+    ```
+
+* Point your device or browser to `https://127.0.0.1:3000/dns-query` for full DoH functionality ([wiki.alpinelinux.org][1]).
+
+---
+
+### 🧩 Native DNS over TCP vs DoH
+
+* Alpine’s musl libc **did not support DNS over TCP** for a long time, only UDP.
+* **As of Alpine 3.18 (musl 1.2.4)**, DNS-over-TCP is supported natively, fixing issues with large DNS responses ([The Register Forums][2]).
+* DNS-over-HTTPS is **not built into musl**, so `dnscrypt-proxy` is still required for DoH.
+
+---
+
+### ✅ Summary
+
+| Feature              | Alpine Linux Support            |
+| -------------------- | ------------------------------- |
+| DNS-over-HTTPS (DoH) | ✅ Yes, via `dnscrypt-proxy`     |
+| DNS-over-TLS (DoT)   | ✅ Yes, via `dnscrypt-proxy`     |
+| DNS-over-TCP         | ✅ Yes, natively in Alpine 3.18+ |
+| Native DoH in musl   | ❌ No                            |
+
+---
+
+### 🛠 Next steps
+
+* Which Alpine version are you using?
+* Want help configuring `dnscrypt-proxy` or setting up local DoH?
+* Need guidance configuring browsers or system-wide resolver?
+
+Let me know what setup you're aiming for and I’ll guide you through it.
+
+[1]: https://wiki.alpinelinux.org/wiki/DNSCrypt-Proxy?utm_source=chatgpt.com "DNSCrypt-Proxy - Alpine Linux"
+[2]: https://forums.theregister.com/forum/all/2023/05/16/alpine_linux_318/?utm_source=chatgpt.com "Alpine Linux 3.18 fixes DNS over TCP issue, now ready for all the ..."
