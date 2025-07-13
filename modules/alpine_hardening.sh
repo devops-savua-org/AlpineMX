@@ -5,7 +5,7 @@ IFS=$'\n\t'
 ### Constants
 SCRIPT_NAME="alpine_hardening.sh"
 LOG_FILE="/root/os_bootstrap.log"
-NEXT_SCRIPT="/root/bootstrap.sh"
+REBOOT_FLAG="/root/.needs_reboot"
 SSH_CONFIG="/etc/ssh/sshd_config"
 SYSCTL_FILE="/etc/sysctl.conf"
 DRY_RUN=false
@@ -32,7 +32,6 @@ run() {
   fi
 }
 
-### Function: Configure restart-on-failure
 configure_restart_on_failure() {
   local service="$1"
 
@@ -58,7 +57,6 @@ EOF"
   log "✅ $service will now restart on failure."
 }
 
-### Function: Set DNS to Quad9
 set_dns_to_quad9() {
   log "🔧 Setting DNS to Quad9 (9.9.9.9)..."
 
@@ -71,7 +69,6 @@ set_dns_to_quad9() {
   grep "9.9.9.9" /etc/resolv.conf && log "✅ Quad9 DNS verified in /etc/resolv.conf"
 }
 
-### Function: Disable IPv6 at boot (extlinux only)
 disable_ipv6_boot_param() {
   log "🔧 Checking for extlinux bootloader config..."
   if [ -f /etc/update-extlinux.conf ]; then
@@ -170,6 +167,6 @@ configure_restart_on_failure "auditd"
 configure_restart_on_failure "fail2ban"
 configure_restart_on_failure "netdata"
 
-### 10. Log and callback
-log "✅ Hardening complete. Returning to bootstrap.sh..."
-exec "$NEXT_SCRIPT"
+### 10. Request reboot
+log "⚠️ Hardening complete — requesting reboot..."
+touch "$REBOOT_FLAG"
