@@ -5,7 +5,7 @@ IFS=$'\n\t'
 ### Constants
 SCRIPT_NAME="boot.sh"
 LOG_FILE="/root/os_bootstrap.log"
-SETTINGS_FILE="/root/settings_validation.JSON"
+SETTINGS_FILE="/root/settings_validation.yaml"
 BOOTSTRAP_SCRIPT="/root/bootstrap.sh"
 DRY_RUN=false
 BOOTSTRAP_STARTED=false
