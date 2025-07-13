@@ -5,6 +5,7 @@ IFS=$'\n\t'
 ### Constants
 SCRIPT_NAME="alpine_monitoring.sh"
 LOG_FILE="/root/os_bootstrap.log"
+REBOOT_FLAG="/root/.needs_reboot"
 METADATA_JSON="/root/Home/metadata/monitoring.json"
 NETDATA_SYNC_GIST="https://gist.githubusercontent.com/devops-savua-org/9179fb1223d6e6f14e6d6dc4b8394dc3/raw/sync_monitoring_config.sh"
 DRY_RUN=false
@@ -177,4 +178,6 @@ cat <<EOF > "$METADATA_JSON"
 }
 EOF
 
-log "✅ alpine_monitoring.sh completed."
+### 6. Reboot trigger
+log "⚠️ Monitoring setup complete — requesting reboot..."
+touch "$REBOOT_FLAG"
