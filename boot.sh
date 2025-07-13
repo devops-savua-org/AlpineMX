@@ -3,53 +3,68 @@ set -euo pipefail
 IFS=$'\n\t'
 
 ### Constants
-STATUS_FILE="/root/bootstrap_status.json"
-LOG_FILE="/var/log/boot.log"
-STAGE_FLAGS=".baseline_done .hardening_done .monitoring_done .deploy_done"
-REBOOT_FLAG="/root/.needs_reboot"
-BOOTSTRAP="/root/bootstrap.sh"
+SCRIPT_NAME="boot.sh"
+LOG_FILE="/root/os_bootstrap.log"
+SETTINGS_FILE="/root/settings_validation.JSON"
+BOOTSTRAP_SCRIPT="/root/bootstrap.sh"
+DRY_RUN=false
+BOOTSTRAP_STARTED=false
+
+# Parse --dry-run
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run)
+      DRY_RUN=true
+      echo "[DRY RUN] No changes will be made."
+      ;;
+  esac
+done
 
 log() {
-  echo "[$(date -Iseconds)] [BOOT] $*" | tee -a "$LOG_FILE"
+  echo "[$(date -Iseconds)] [$SCRIPT_NAME] $*" | tee -a "$LOG_FILE"
 }
 
-check_flag() {
-  [ -f "/root/$1" ] && echo true || echo false
+get_current_value() {
+  local command="$1"
+  eval "$command" 2>/dev/null | tr -d '\n'
 }
 
-check_network() {
-  ping -q -c1 1.1.1.1 >/dev/null 2>&1 && echo true || echo false
-}
+validate_setting() {
+  local name="$1"
+  local expected="$2"
+  local check_cmd="$3"
 
-generate_json_status() {
-  log "📄 Generating JSON status at $STATUS_FILE..."
+  local current
+  current=$(get_current_value "$check_cmd")
 
-  {
-    echo "{"
-    echo "  \"timestamp\": \"$(date -Iseconds)\","
-    echo "  \"baseline\": $(check_flag .baseline_done),"
-    echo "  \"hardening\": $(check_flag .hardening_done),"
-    echo "  \"monitoring\": $(check_flag .monitoring_done),"
-    echo "  \"deploy\": $(check_flag .deploy_done),"
-    echo "  \"reboot_required\": $(check_flag .needs_reboot),"
-    echo "  \"network\": $(check_network)"
-    echo "}"
-  } > "$STATUS_FILE"
+  if [ "$current" = "$expected" ]; then
+    log "✅ [$name] OK = '$current'"
+    return 0
+  else
+    log "❌ [$name] Expected '$expected' but found '$current'"
+
+    if ! $BOOTSTRAP_STARTED; then
+      log "🚀 Launching bootstrap.sh in background..."
+      $DRY_RUN || "$BOOTSTRAP_SCRIPT" &
+      BOOTSTRAP_STARTED=true
+    fi
+
+    return 1
+  fi
 }
 
 main() {
-  log "🔁 Boot script started."
+  log "🔍 Starting settings validation..."
 
-  generate_json_status
+  while IFS= read -r entry; do
+    name=$(echo "$entry" | jq -r '.name')
+    expected=$(echo "$entry" | jq -r '.expected')
+    check_cmd=$(echo "$entry" | jq -r '.check')
 
-  if [ -f "$REBOOT_FLAG" ]; then
-    log "⚠️  Reboot was pending — clearing flag and exiting for reboot."
-    rm -f "$REBOOT_FLAG"
-    exit 0
-  fi
+    validate_setting "$name" "$expected" "$check_cmd" || true
+  done < <(jq -c '.[]' "$SETTINGS_FILE")
 
-  log "📦 Handing control to bootstrap.sh..."
-  "$BOOTSTRAP" --status-json "$STATUS_FILE"
+  log "✅ Validation complete."
 }
 
-main
+main "$@"
