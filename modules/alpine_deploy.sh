@@ -13,6 +13,7 @@ ENCRYPTED_DIR="/root/Home/metadata_encrypted"
 DEVICE_CONTEXT_URL="https://gist.githubusercontent.com/devops-savua-org/fffcdfb96cac6f6f37921530d410f2ec/raw"
 DEVICE_CONTEXT_ENV="$METADATA_DIR/DEVICE_CONTEXT.env"
 METADATA_JSON="$METADATA_DIR/deployment.json"
+REBOOT_FLAG="/root/.needs_reboot"
 
 log() {
   echo "[$(date -Iseconds)] [$SCRIPT_NAME] $*" | tee -a "$LOG_FILE"
@@ -98,4 +99,6 @@ else
   log "Skipped Tailscale provisioning."
 fi
 
-log "✅ alpine_deploy.sh completed."
+### 6. Request reboot to finalize deploy
+log "⚠️ Deployment complete — requesting reboot for clean state..."
+touch "$REBOOT_FLAG"
