@@ -2,7 +2,7 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-### Constants
+### 0. Constants
 SCRIPT_DIR="/root"
 SCRIPT_BASE_URL="https://gist.githubusercontent.com/devops-savua-org/aa5a147371d59c7bef9383d713ff1954/raw/fc5efa494fd7adce4657d2f712172e99a82a7687"
 LOG_FILE="/root/os_bootstrap.log"
@@ -11,12 +11,20 @@ SCRIPT_LIST="alpine_baseline.sh alpine_hardening.sh alpine_monitoring.sh alpine_
 GPG_KEY_ID="0482D84022F52DF1C4E7CD43293ACD0907D9495A"
 DRY_RUN=false
 
-### Parse Args
+### 1. Parse Args
 for arg in "$@"; do
   case "$arg" in
-    --dry-run) DRY_RUN=true; echo "[DRY RUN] No changes will be made." ;;
+    --dry-run)
+      DRY_RUN=true
+      echo "[DRY RUN] No changes will be made."
+      ;;
   esac
 done
+
+### 2. Logging Setup
+log() {
+  echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+}
 
 run() {
   if $DRY_RUN; then
@@ -26,18 +34,27 @@ run() {
   fi
 }
 
-log() {
-  echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
-}
+### 3. Enable persistent journald logging early
+log "Ensuring /var/log/journal exists..."
+mkdir -p /var/log/journal
 
-### Check Network
+log "Setting journald to use persistent storage..."
+sed -i 's|^#*Storage=.*|Storage=persistent|' /etc/systemd/journald.conf
+
+log "Restarting journald to apply changes..."
+systemctl restart systemd-journald 2>/dev/null || rc-service systemd-journald restart 2>/dev/null || true
+
+### 4. Redirect shell output to persistent log
+exec > >(tee -a /var/log/bootstrap.log) 2>&1
+
+### 5. Network Check
 check_network() {
   log "Checking network connectivity..."
   ping -q -c 1 1.1.1.1 || { log "❌ Network unreachable."; exit 1; }
   log "✅ Network reachable."
 }
 
-### Fetch GPG Key
+### 6. GPG Key Import
 setup_gpg() {
   if ! gpg --list-keys "$GPG_KEY_ID" > /dev/null 2>&1; then
     log "Importing GPG key..."
@@ -45,22 +62,19 @@ setup_gpg() {
   fi
 }
 
-### Validate Integrity
+### 7. Verify Script
 verify_script() {
   local file="$1"
-  local url_base="$SCRIPT_BASE_URL"
 
   log "Verifying $file..."
 
-  run "wget -q ${url_base}/${file}.sha256 -O ${SCRIPT_DIR}/${file}.sha256"
-  run "wget -q ${url_base}/${file}.asc -O ${SCRIPT_DIR}/${file}.asc"
+  run "wget -q ${SCRIPT_BASE_URL}/${file}.sha256 -O ${SCRIPT_DIR}/${file}.sha256"
+  run "wget -q ${SCRIPT_BASE_URL}/${file}.asc -O ${SCRIPT_DIR}/${file}.asc"
 
-  # GPG verification
   gpg --verify "${SCRIPT_DIR}/${file}.asc" "${SCRIPT_DIR}/${file}" || {
     log "❌ GPG verification failed for $file"; exit 1;
   }
 
-  # SHA256 verification
   cd "$SCRIPT_DIR"
   sha256sum -c "${file}.sha256" || {
     log "❌ SHA256 checksum failed for $file"; exit 1;
@@ -69,7 +83,7 @@ verify_script() {
   log "✅ $file verified successfully."
 }
 
-### Resume Support
+### 8. Status Tracking
 has_run() {
   grep -q "$1" "$STATUS_FILE" 2>/dev/null
 }
@@ -78,7 +92,7 @@ mark_done() {
   echo "$1" >> "$STATUS_FILE"
 }
 
-### Start Bootstrap
+### 9. Bootstrap Execution
 main() {
   check_network
   setup_gpg
