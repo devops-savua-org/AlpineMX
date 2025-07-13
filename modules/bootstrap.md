@@ -7,6 +7,8 @@ SCRIPT_DIR="/root"
 SCRIPT_BASE_URL="https://gist.githubusercontent.com/devops-savua-org/aa5a147371d59c7bef9383d713ff1954/raw/fc5efa494fd7adce4657d2f712172e99a82a7687"
 LOG_FILE="/root/os_bootstrap.log"
 STATUS_FILE="/root/.bootstrap_status"
+RESUME_LOG="/var/log/bootstrap_resume.log"
+REBOOT_FLAG="/root/.reboot_required"
 SCRIPT_LIST="alpine_baseline.sh alpine_hardening.sh alpine_monitoring.sh alpine_deploy.sh alpine_cronjobs.sh"
 GPG_KEY_ID="0482D84022F52DF1C4E7CD43293ACD0907D9495A"
 DRY_RUN=false
@@ -94,6 +96,13 @@ mark_done() {
 
 ### 9. Bootstrap Execution
 main() {
+  # Handle resume after reboot
+  if [ -f "$REBOOT_FLAG" ]; then
+    log "🔁 Detected resume after reboot. Continuing bootstrap..."
+    echo "[$(date -Iseconds)] Resumed after reboot" >> "$RESUME_LOG"
+    rm -f "$REBOOT_FLAG"
+  fi
+
   check_network
   setup_gpg
 
@@ -116,7 +125,16 @@ main() {
     fi
 
     mark_done "$script"
+    echo "[$(date -Iseconds)] Finished $script" >> "$RESUME_LOG"
     log "✅ Completed $script."
+
+    # Trigger reboot if the script requests it
+    if [ -f "$REBOOT_FLAG" ]; then
+      log "⚠️  Script requested a reboot. Rebooting now..."
+      sync
+      reboot
+      exit 0
+    fi
   done
 
   log "🎉 All scripts completed successfully."
