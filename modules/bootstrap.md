@@ -1,3 +1,6 @@
+##### Don't forget to code the VALIDATION of each .sh by bootstrap
+
+
 #!/bin/sh
 set -euo pipefail
 IFS=$'\n\t'
