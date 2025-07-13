@@ -10,7 +10,7 @@ TEMP_FILE="/tmp/settings_validation.download"
 BOOTSTRAP_SCRIPT="/root/bootstrap.sh"
 BOOTSTRAP_MARKER="/root/.bootstrap_launched"
 LOCK_FILE="/var/lock/boot.sh.lock"
-SETTINGS_URL="https://raw.githubusercontent.com/devops-savua-org/AlpineMX/51ac7741dcd26f954382d0d7d57c8c58982a1d10/system_settings.yaml"
+SETTINGS_URL="https://github.com/devops-savua-org/AlpineMX/blob/b0271d17281cbc9e87ceea0a044a0dc8ab879695/system_settings.yaml"
 
 DRY_RUN=false
 BOOTSTRAP_STARTED=false
