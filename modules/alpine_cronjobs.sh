@@ -10,14 +10,18 @@ METADATA_FILE="/root/Home/metadata/telemetry.json"
 ENCRYPTED_FILE="${METADATA_FILE}.gpg"
 NETDATA_SYNC_SCRIPT="/usr/local/bin/sync_monitoring_config.sh"
 DRY_RUN=false
+FORCE_RUN=false
+FREQ="daily"  # default
 
-# Parse --dry-run
+# Parse args
 for arg in "$@"; do
   case "$arg" in
-    --dry-run)
-      DRY_RUN=true
-      echo "[DRY RUN] No changes will be made."
-      ;;
+    --dry-run) DRY_RUN=true ;;
+    --now|--force) FORCE_RUN=true ;;
+    --hourly) FREQ="hourly" ;;
+    --6h)     FREQ="6h" ;;
+    --daily)  FREQ="daily" ;;
+    --weekly) FREQ="weekly" ;;
   esac
 done
 
@@ -77,8 +81,14 @@ for svc in osqueryd netdata wazuh-agent; do
   fi
 done
 
-### 6. Schedule task
-log "🕒 Scheduling telemetry via systemd or cron..."
+### 6. Skip scheduling if --now or --force passed
+if $FORCE_RUN; then
+  log "⚡ Manual run triggered: skipping schedule setup."
+  exit 0
+fi
+
+### 7. Schedule task based on frequency
+log "🕒 Scheduling telemetry ($FREQ)..."
 if command -v systemctl >/dev/null && [ -d /etc/systemd/system ]; then
   cat <<EOF > /etc/systemd/system/alpine_cronjobs.service
 [Unit]
@@ -89,24 +99,43 @@ Type=oneshot
 ExecStart=/root/alpine_cronjobs.sh
 EOF
 
-  cat <<EOF > /etc/systemd/system/alpine_cronjobs.timer
-[Unit]
-Description=Run alpine_cronjobs.sh daily
+  TIMER_PATH="/etc/systemd/system/alpine_cronjobs.timer"
 
-[Timer]
-OnBootSec=10min
-OnUnitActiveSec=1d
-Persistent=true
+  case "$FREQ" in
+    hourly)
+      TIMER_CONTENT="[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true" ;;
+    6h)
+      TIMER_CONTENT="[Timer]\nOnBootSec=10min\nOnUnitActiveSec=6h\nPersistent=true" ;;
+    daily)
+      TIMER_CONTENT="[Timer]\nOnBootSec=10min\nOnUnitActiveSec=1d\nPersistent=true" ;;
+    weekly)
+      TIMER_CONTENT="[Timer]\nOnCalendar=weekly\nPersistent=true" ;;
+  esac
+
+  cat <<EOF > "$TIMER_PATH"
+[Unit]
+Description=Run alpine_cronjobs.sh ($FREQ)
+
+$TIMER_CONTENT
 
 [Install]
 WantedBy=timers.target
 EOF
 
+  run "systemctl daemon-reexec"
   run "systemctl daemon-reload"
   run "systemctl enable --now alpine_cronjobs.timer"
 else
   log "🌀 Using cron fallback"
-  (crontab -l 2>/dev/null; echo "0 4 * * * /root/alpine_cronjobs.sh") | crontab -
+  CRON_EXPR="0 4 * * *"  # default daily
+  case "$FREQ" in
+    hourly) CRON_EXPR="0 * * * *" ;;
+    6h)     CRON_EXPR="0 */6 * * *" ;;
+    weekly) CRON_EXPR="0 4 * * 0" ;;
+  esac
+
+  # Avoid duplicate entries
+  (crontab -l 2>/dev/null | grep -v alpine_cronjobs.sh; echo "$CRON_EXPR /root/alpine_cronjobs.sh") | crontab -
 fi
 
 log "✅ alpine_cronjobs.sh completed."
