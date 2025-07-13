@@ -114,4 +114,74 @@ Once bootstrapped, this base is ideal for:
 
 ---
 
-Let me know if you’d like this turned into a downloadable ZIP, published as a Gist, or embedded in a GitHub repo structure.
+# 🕒 Scheduling & Frequency Configuration
+
+The `alpine_cronjobs.sh` script supports automated scheduling through either:
+
+- **systemd timers** (preferred if available)
+- **cron fallback** (for minimal Alpine setups)
+
+---
+
+## ✅ Default Schedule
+
+- **Daily at boot**:
+  - Starts 10 minutes after boot
+  - Repeats every 24 hours
+
+---
+
+## 🔁 Modify Cron/systemd Frequency
+
+You can change the job's frequency by passing a flag during the first run:
+
+| Frequency     | Flag       | systemd Schedule           | cron Schedule         |
+|---------------|------------|----------------------------|------------------------|
+| Hourly        | `--hourly` | Every 1h after boot        | `0 * * * *`            |
+| Every 6 hours | `--6h`     | Every 6h after boot        | `0 */6 * * *`          |
+| Daily         | `--daily`  | Every 24h after boot       | `0 4 * * *` (default)  |
+| Weekly        | `--weekly` | Every Sunday via calendar  | `0 4 * * 0`            |
+
+Run the script once with the desired frequency:
+
+```sh
+/root/alpine_cronjobs.sh --daily
+```
+
+---
+
+## 🧪 Manual Execution
+
+To run the script immediately (without modifying schedule):
+
+```sh
+/root/alpine_cronjobs.sh --now
+```
+
+To test without making changes:
+
+```sh
+/root/alpine_cronjobs.sh --now --dry-run
+```
+
+---
+
+## 🔄 Updating or Resetting the Schedule
+
+If you already installed the script and want to change the frequency later:
+
+### For systemd (VMs, LXC with systemd)
+```sh
+rm -f /etc/systemd/system/alpine_cronjobs.*
+systemctl daemon-reload
+/root/alpine_cronjobs.sh --6h
+```
+
+### For cron fallback (minimal Alpine)
+```sh
+crontab -r
+/root/alpine_cronjobs.sh --weekly
+```
+
+This will regenerate the proper timer or crontab entry based on your new schedule.
+
