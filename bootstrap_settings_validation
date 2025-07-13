@@ -1,0 +1,133 @@
+{
+  "timestamp": "2025-07-13T10:27:15.736810",
+  "boot.sh": {
+    "creates": [
+      "/root/bootstrap_status.json"
+    ],
+    "reads": [
+      "/root/.baseline_done",
+      "/root/.hardening_done",
+      "/root/.monitoring_done",
+      "/root/.deploy_done",
+      "/root/.needs_reboot"
+    ],
+    "network_check": "ping 1.1.1.1",
+    "calls": [
+      "/root/bootstrap.sh --status-json /root/bootstrap_status.json"
+    ]
+  },
+  "bootstrap.sh": {
+    "reads": [
+      "/root/bootstrap_status.json"
+    ],
+    "writes": [
+      "/root/Home/metadata/bootstrap_status.json",
+      "/root/.baseline_done",
+      "/root/.hardening_done",
+      "/root/.monitoring_done",
+      "/root/.deploy_done"
+    ],
+    "verifies": "GPG + SHA256 of stage scripts",
+    "reboot_trigger": "/root/.needs_reboot"
+  },
+  "alpine_baseline.sh": {
+    "apk_add": [
+      "bash",
+      "curl",
+      "wget",
+      "sudo",
+      "nano",
+      "openssh",
+      "apk-tools",
+      "gnupg",
+      "unzip",
+      "zip",
+      "tar",
+      "bash-completion",
+      "rsync",
+      "iptables",
+      "ufw",
+      "audit",
+      "cryptsetup",
+      "tailscale",
+      "htop",
+      "tmux",
+      "ncdu",
+      "logrotate",
+      "osquery"
+    ],
+    "creates": [
+      "/root/Home/metadata",
+      "/root/Home/metadata_encrypted"
+    ],
+    "modifies": [
+      "/etc/apk/repositories"
+    ],
+    "reboot_trigger": "/root/.needs_reboot"
+  },
+  "alpine_hardening.sh": {
+    "ssh_config": {
+      "Port": 88,
+      "PermitRootLogin": "no",
+      "PasswordAuthentication": "no",
+      "AllowUsers": "alpine",
+      "MaxAuthTries": 3,
+      "LogLevel": "VERBOSE",
+      "Ciphers": "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com",
+      "KexAlgorithms": "curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
+    },
+    "firewall": {
+      "defaults": {
+        "incoming": "deny",
+        "outgoing": "allow"
+      },
+      "allowed_ports": [
+        "88/tcp",
+        "out 53,443 tcp",
+        "out 53,443 udp"
+      ]
+    },
+    "ipv6_disabled": true,
+    "dns": "9.9.9.9",
+    "services_restart_on_failure": [
+      "tailscaled",
+      "auditd",
+      "fail2ban",
+      "netdata"
+    ],
+    "reboot_trigger": "/root/.needs_reboot"
+  },
+  "alpine_monitoring.sh": {
+    "installs": [
+      "osquery",
+      "netdata (optional)",
+      "wazuh-agent (optional)",
+      "crowdsec (optional)"
+    ],
+    "configs": {
+      "osquery.conf": "/etc/osquery/osquery.conf",
+      "logrotate": "/etc/logrotate.d/security-logs",
+      "netdata_sync": "/usr/local/bin/sync_monitoring_config.sh"
+    },
+    "metadata_output": "/root/Home/metadata/monitoring.json",
+    "reboot_trigger": "/root/.needs_reboot"
+  },
+  "alpine_deploy.sh": {
+    "vault": {
+      "device": "/dev/sda1",
+      "mapper": "secure_vault",
+      "mountpoint": "/mnt/secure_vault"
+    },
+    "downloads": [
+      "DEVICE_CONTEXT.env"
+    ],
+    "exports_env": "DEVICE_CONTEXT.env",
+    "writes": "/root/Home/metadata/deployment.json",
+    "tailscale_provisioning": true,
+    "reboot_trigger": "/root/.needs_reboot"
+  },
+  "alpine_cronjobs.sh": {
+    "cron_setup": "sync_monitoring_config.timer",
+    "metadata": "telemetry.json (.gpg optional)"
+  }
+}
