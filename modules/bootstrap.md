@@ -1,34 +1,29 @@
-##### Don't forget to code the VALIDATION of each .sh by bootstrap
-
-
 #!/bin/sh
 set -euo pipefail
 IFS=$'\n\t'
 
-### 0. Constants
+### Constants
 SCRIPT_DIR="/root"
-SCRIPT_BASE_URL="https://gist.githubusercontent.com/devops-savua-org/aa5a147371d59c7bef9383d713ff1954/raw/fc5efa494fd7adce4657d2f712172e99a82a7687"
-LOG_FILE="/root/os_bootstrap.log"
 STATUS_FILE="/root/.bootstrap_status"
-RESUME_LOG="/var/log/bootstrap_resume.log"
-REBOOT_FLAG="/root/.reboot_required"
-SCRIPT_LIST="alpine_baseline.sh alpine_hardening.sh alpine_monitoring.sh alpine_deploy.sh alpine_cronjobs.sh"
+LOG_FILE="/root/os_bootstrap.log"
+REBOOT_FLAG="/root/.needs_reboot"
+METADATA_OUTPUT="/root/Home/metadata/bootstrap_status.json"
+SCRIPT_BASE_URL="https://gist.githubusercontent.com/devops-savua-org/aa5a147371d59c7bef9383d713ff1954/raw/fc5efa494fd7adce4657d2f712172e99a82a7687"
 GPG_KEY_ID="0482D84022F52DF1C4E7CD43293ACD0907D9495A"
+
+### Variables
+STATUS_JSON=""
 DRY_RUN=false
 
-### 1. Parse Args
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run)
-      DRY_RUN=true
-      echo "[DRY RUN] No changes will be made."
-      ;;
-  esac
-done
+### Stage Map
+STAGES="\
+baseline:.baseline_done:alpine_baseline.sh
+hardening:.hardening_done:alpine_hardening.sh
+monitoring:.monitoring_done:alpine_monitoring.sh
+deploy:.deploy_done:alpine_deploy.sh"
 
-### 2. Logging Setup
 log() {
-  echo "[$(date -Iseconds)] $*" | tee -a "$LOG_FILE"
+  echo "[$(date -Iseconds)] [BOOTSTRAP] $*" | tee -a "$LOG_FILE"
 }
 
 run() {
@@ -39,108 +34,82 @@ run() {
   fi
 }
 
-### 3. Enable persistent journald logging early
-log "Ensuring /var/log/journal exists..."
-mkdir -p /var/log/journal
-
-log "Setting journald to use persistent storage..."
-sed -i 's|^#*Storage=.*|Storage=persistent|' /etc/systemd/journald.conf
-
-log "Restarting journald to apply changes..."
-systemctl restart systemd-journald 2>/dev/null || rc-service systemd-journald restart 2>/dev/null || true
-
-### 4. Redirect shell output to persistent log
-exec > >(tee -a /var/log/bootstrap.log) 2>&1
-
-### 5. Network Check
-check_network() {
-  log "Checking network connectivity..."
-  ping -q -c 1 1.1.1.1 || { log "❌ Network unreachable."; exit 1; }
-  log "✅ Network reachable."
+mark_done() {
+  local flag="$1"
+  touch "/root/$flag"
 }
 
-### 6. GPG Key Import
-setup_gpg() {
-  if ! gpg --list-keys "$GPG_KEY_ID" > /dev/null 2>&1; then
-    log "Importing GPG key..."
-    run "gpg --keyserver keyserver.ubuntu.com --recv-keys $GPG_KEY_ID"
-  fi
-}
-
-### 7. Verify Script
 verify_script() {
   local file="$1"
-
-  log "Verifying $file..."
+  log "Verifying GPG + SHA256 for $file..."
 
   run "wget -q ${SCRIPT_BASE_URL}/${file}.sha256 -O ${SCRIPT_DIR}/${file}.sha256"
   run "wget -q ${SCRIPT_BASE_URL}/${file}.asc -O ${SCRIPT_DIR}/${file}.asc"
-
+  gpg --keyserver keyserver.ubuntu.com --recv-keys "$GPG_KEY_ID" 2>/dev/null || true
   gpg --verify "${SCRIPT_DIR}/${file}.asc" "${SCRIPT_DIR}/${file}" || {
-    log "❌ GPG verification failed for $file"; exit 1;
+    log "❌ GPG verification failed"; exit 1;
   }
 
-  cd "$SCRIPT_DIR"
-  sha256sum -c "${file}.sha256" || {
-    log "❌ SHA256 checksum failed for $file"; exit 1;
+  sha256sum -c "${SCRIPT_DIR}/${file}.sha256" || {
+    log "❌ SHA256 mismatch"; exit 1;
   }
-
-  log "✅ $file verified successfully."
 }
 
-### 8. Status Tracking
-has_run() {
-  grep -q "$1" "$STATUS_FILE" 2>/dev/null
-}
+### Parse Args
+for arg in "$@"; do
+  case "$arg" in
+    --status-json)
+      shift
+      STATUS_JSON="$1"
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      ;;
+  esac
+done
 
-mark_done() {
-  echo "$1" >> "$STATUS_FILE"
-}
+[ -z "$STATUS_JSON" ] && { log "❌ --status-json missing"; exit 1; }
 
-### 9. Bootstrap Execution
+### Main Logic
 main() {
-  # Handle resume after reboot
-  if [ -f "$REBOOT_FLAG" ]; then
-    log "🔁 Detected resume after reboot. Continuing bootstrap..."
-    echo "[$(date -Iseconds)] Resumed after reboot" >> "$RESUME_LOG"
-    rm -f "$REBOOT_FLAG"
-  fi
+  log "🚀 Bootstrap launched with JSON: $STATUS_JSON"
 
-  check_network
-  setup_gpg
+  cp "$STATUS_JSON" "$METADATA_OUTPUT"
 
-  for script in $SCRIPT_LIST; do
-    if has_run "$script"; then
-      log "Skipping $script — already completed."
-      continue
-    fi
+  for entry in $STAGES; do
+    stage="${entry%%:*}"
+    flag="${entry#*:}"
+    flag="${flag%%:*}"
+    script="${entry##*:}"
 
-    log "Fetching $script..."
+    done=$(jq -r ".${stage}" "$STATUS_JSON")
+    [ "$done" = "true" ] && continue
+
+    log "➡️  Executing stage: $stage ($script)"
+
     run "wget -q ${SCRIPT_BASE_URL}/${script} -O ${SCRIPT_DIR}/${script}"
     run "chmod +x ${SCRIPT_DIR}/${script}"
-
     verify_script "$script"
 
-    log "Running $script..."
-    if ! run "${SCRIPT_DIR}/${script}"; then
-      log "❌ Failed executing $script — exiting bootstrap."
+    if run "${SCRIPT_DIR}/${script}"; then
+      mark_done "$flag"
+      log "✅ Stage $stage complete."
+    else
+      log "❌ Failed: $stage — exiting."
       exit 1
     fi
 
-    mark_done "$script"
-    echo "[$(date -Iseconds)] Finished $script" >> "$RESUME_LOG"
-    log "✅ Completed $script."
-
-    # Trigger reboot if the script requests it
     if [ -f "$REBOOT_FLAG" ]; then
-      log "⚠️  Script requested a reboot. Rebooting now..."
+      log "⚠️  $script requested reboot."
       sync
       reboot
       exit 0
     fi
+
+    break  # Only one stage per boot
   done
 
-  log "🎉 All scripts completed successfully."
+  log "🎉 All required stages completed or waiting on next boot."
 }
 
-main "$@"
+main
