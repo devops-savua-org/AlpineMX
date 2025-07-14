@@ -1,133 +1,52 @@
 #!/bin/sh
-set -euo pipefail
-IFS=$'\n\t'
+set -eu
 
-### Constants
-SCRIPT_NAME="boot.sh"
-LOG_FILE="/root/os_bootstrap.log"
-SETTINGS_FILE="/root/settings_validation.yaml"
-TEMP_FILE="/tmp/settings_validation.download"
-BOOTSTRAP_SCRIPT="/root/bootstrap.sh"
-BOOTSTRAP_MARKER="/root/.bootstrap_launched"
-LOCK_FILE="/var/lock/boot.sh.lock"
-SETTINGS_URL="https://github.com/devops-savua-org/AlpineMX/blob/b0271d17281cbc9e87ceea0a044a0dc8ab879695/system_settings.yaml"
+# === CONFIG ===
+SCRIPT_NAME="validate_hardening.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/devops-savua-org/AlpineMX/<PERMALINK-COMMIT>/startup/$SCRIPT_NAME"
+LOCAL_CACHE="/etc/hardening/cache/$SCRIPT_NAME"
+LOCAL_PATH="/tmp/$SCRIPT_NAME"
+LOG="/var/log/hardening_boot.log"
 
-DRY_RUN=false
-BOOTSTRAP_STARTED=false
+# Create cache dir if missing
+mkdir -p "$(dirname "$LOCAL_CACHE")"
 
-### Parse --dry-run
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run)
-      DRY_RUN=true
-      echo "[DRY RUN] No changes will be made."
-      ;;
-  esac
-done
+# Lock to avoid concurrent runs
+exec 200>/var/lock/boot.lock
+flock -n 200 || exit 1
 
 log() {
-  echo "[$(date -Iseconds)] [$SCRIPT_NAME] $*" | tee -a "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
 }
 
-run() {
-  if $DRY_RUN; then
-    echo "[DRY RUN] $*"
-  else
-    eval "$@" | tee -a "$LOG_FILE"
-  fi
-}
+log "🔐 Boot sequence started"
 
-### Lock execution
-exec 200>"$LOCK_FILE"
-flock -n 200 || {
-  log "⛔ Another instance is already running. Exiting."
+# === Download and cache ===
+if curl -fsSL "$SCRIPT_URL" -o "$LOCAL_PATH"; then
+  log "✅ Downloaded $SCRIPT_NAME from GitHub"
+
+  # Optional: SHA256 check
+  # EXPECTED_HASH="..."
+  # ACTUAL_HASH=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
+  # if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+  #   log "❌ SHA256 mismatch. Falling back to cached version."
+  #   cp "$LOCAL_CACHE" "$LOCAL_PATH"
+  # fi
+
+  cp "$LOCAL_PATH" "$LOCAL_CACHE"
+  chmod 700 "$LOCAL_PATH"
+else
+  log "⚠️  Failed to download. Using cached version"
+  cp "$LOCAL_CACHE" "$LOCAL_PATH"
+fi
+
+# === Execute ===
+if [ -f "$LOCAL_PATH" ]; then
+  log "🚀 Running $SCRIPT_NAME"
+  sh "$LOCAL_PATH" || log "❌ $SCRIPT_NAME exited with error"
+else
+  log "❌ No valid copy of $SCRIPT_NAME found"
   exit 1
-}
+fi
 
-### Secure fetch and validate GitHub permalink file
-fetch_and_verify_settings_file() {
-  log "📥 Downloading settings file from GitHub permalink..."
-
-  curl -fsSL "$SETTINGS_URL" -o "$TEMP_FILE"
-
-  log "🔒 Verifying SHA256 against commit SHA..."
-
-  file_hash=$(sha256sum "$TEMP_FILE" | awk '{print $1}')
-  commit_sha=$(echo "$SETTINGS_URL" | awk -F '/' '{print $(NF-1)}')
-
-  if echo "$file_hash" | grep -qi "$commit_sha"; then
-    log "✅ SHA256 Pairing Passed (includes commit SHA)"
-    mv "$TEMP_FILE" "$SETTINGS_FILE"
-  else
-    log "❌ SHA256 Pair returned FALSE"
-    rm -f "$TEMP_FILE"
-    exit 1
-  fi
-}
-
-### File permission checks
-check_permissions() {
-  log "🔐 Checking file permissions..."
-  [ "$(stat -c "%a" $SETTINGS_FILE)" = "600" ] || log "⚠️ WARNING: Incorrect permissions on $SETTINGS_FILE"
-  [ "$(stat -c "%a" /root/boot.sh)" = "700" ] || log "⚠️ WARNING: Incorrect permissions on /root/boot.sh"
-  [ "$(stat -c "%a" $BOOTSTRAP_SCRIPT)" = "700" ] || log "⚠️ WARNING: Incorrect permissions on $BOOTSTRAP_SCRIPT"
-}
-
-get_current_value() {
-  local command="$1"
-  if echo "$command" | grep -qE '[^a-zA-Z0-9 _|:&;<>/\.\-]' ; then
-    log "🚫 Suspicious command detected: $command"
-    echo ""
-    return
-  fi
-  eval "$command" 2>/dev/null | tr -d '\n'
-}
-
-validate_setting() {
-  local name="$1"
-  local expected="$2"
-  local check_cmd="$3"
-
-  local current
-  current=$(get_current_value "$check_cmd")
-
-  if [ "$current" = "$expected" ]; then
-    log "✅ [$name] OK = '$current'"
-    return 0
-  else
-    log "❌ [$name] Expected '$expected' but found '$current'"
-
-    if ! $BOOTSTRAP_STARTED && [ ! -f "$BOOTSTRAP_MARKER" ]; then
-      log "🚀 Launching bootstrap.sh in background..."
-      $DRY_RUN || "$BOOTSTRAP_SCRIPT" &
-      echo "$!" > /var/run/bootstrap.pid
-      touch "$BOOTSTRAP_MARKER"
-      BOOTSTRAP_STARTED=true
-    fi
-
-    return 1
-  fi
-}
-
-main() {
-  log "🔍 Starting settings validation..."
-  fetch_and_verify_settings_file
-  check_permissions
-
-  while IFS= read -r entry; do
-    name=$(echo "$entry" | jq -r '.name')
-    expected=$(echo "$entry" | jq -r '.expected')
-    check_cmd=$(echo "$entry" | jq -r '.check')
-
-    if [ -z "$name" ] || [ -z "$expected" ] || [ -z "$check_cmd" ]; then
-      log "⚠️ Skipping invalid entry: $entry"
-      continue
-    fi
-
-    validate_setting "$name" "$expected" "$check_cmd" || true
-  done < <(jq -c '.[]' "$SETTINGS_FILE")
-
-  log "✅ Validation complete."
-}
-
-main "$@"
+log "✅ Boot sequence completed"
