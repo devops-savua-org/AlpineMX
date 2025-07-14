@@ -13,7 +13,9 @@ FORCE=false
 GPG_KEY="4C0A87AE3EA4DE30E4BB3F27397F0F1D3C4FC6BB"
 
 mkdir -p "$CACHE_DIR"
+chmod 700 "$CACHE_DIR"
 mkdir -p "$(dirname $LOG_FILE)"
+chmod 600 "$LOG_FILE"
 
 exec 200>/var/lock/bootloader.lock
 flock -n 200 || exit 1
